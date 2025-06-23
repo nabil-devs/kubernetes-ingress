@@ -6,17 +6,23 @@ ROOTDIR=$(git rev-parse --show-toplevel || echo ".")
 TMPDIR=/tmp
 DEBUG=${DEBUG:-"false"}
 
-DOCS_TO_UPDATE_FOLDER=${ROOTDIR}/site/content
-
  usage() {
-    echo "Usage: $0 <ic_version> <helm_chart_version> <k8s_versions> <release_date>"
+    echo "Usage: $0 <docs_to_update_folder> <ic_version> <helm_chart_version> <k8s_versions> <release_date>"
     exit 1
  }
 
-ic_version=$1
-helm_chart_version=$2
-k8s_versions=$3
-release_date=$4
+ # clone local doc repo
+ # if branch for the release doesnt exist, create it, otherwise checkout
+
+DOCS_TO_UPDATE_FOLDER=$1
+ic_version=$2
+helm_chart_version=$3
+k8s_versions=$4
+release_date=$5
+
+if [ -z "${DOCS_TO_UPDATE_FOLDER}" ]; then
+    usage
+fi
 
 if [ -z "${ic_version}" ]; then
     usage
