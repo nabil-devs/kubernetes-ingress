@@ -53,7 +53,7 @@ if release is not None:
             change = re.search("^(.*) by @.* in (.*)$", item)
             change_title = change.group(1)
             pr_link = change.group(2)
-            pr_number = re.search(r"^.*/(\d+)$", pr_link)
+            pr_number = re.search(r"^.*pull/(\d+)$", pr_link)
             print(f"- [{pr_number.group(1)}]({pr_link}) {change_title}")
 
 # todo
