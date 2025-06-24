@@ -40,6 +40,17 @@ if [ -z "${release_date}" ]; then
     usage
 fi
 
+release_notes_content=$(${ROOTDIR}/.github/scripts/pull-release-notes.py ${ic_version} ${helm_chart_version} ${k8s_versions} "${release_date}")
+if [ $? -ne 0 ]; then
+    echo "ERROR: failed processing release notes"
+    exit 2
+fi
+
+if [ -z "${release_notes_content}" ]; then
+    echo "ERROR: no release notes content"
+    exit 2
+fi
+
 # update releases docs
 file_path=${DOCS_TO_UPDATE_FOLDER}/releases.md
 if [ "${DEBUG}" != "false" ]; then
@@ -47,15 +58,13 @@ if [ "${DEBUG}" != "false" ]; then
 fi
 file_name=$(basename "${file_path}")
 mv "${file_path}" "${TMPDIR}/${file_name}"
-sed -e "8r ${ROOTDIR}/hack/changelog-template.txt" "${TMPDIR}/${file_name}" | sed \
-    -e "s/%%TITLE%%/## $ic_version/g" \
-    -e "s/%%IC_VERSION%%/$ic_version/g" \
-    -e "s/%%HELM_CHART_VERSION%%/$helm_chart_version/g" \
-    -e "s/%%K8S_VERSIONS%%/$k8s_versions.\n/g" \
-    -e "s/%%RELEASE_DATE%%/$release_date/g" \
-    > ${file_path}
+head -n 8 "${TMPDIR}/${file_name}" > "${TMPDIR}/header"
+tail -n +9 "${TMPDIR}/${file_name}" > "${TMPDIR}/body"
+echo "${release_notes_content}" > "${TMPDIR}/release_notes"
+cat "${TMPDIR}/header" "${TMPDIR}/release_notes" "${TMPDIR}/body" > "${file_path}"
 if [ $? -ne 0 ]; then
     echo "ERROR: failed processing ${file_path}"
     mv "${TMPDIR}/${file_name}" "${file_path}"
     exit 2
 fi
+rm -rf "${TMPDIR}/header" "${TMPDIR}/body" "${TMPDIR}/release_notes"
