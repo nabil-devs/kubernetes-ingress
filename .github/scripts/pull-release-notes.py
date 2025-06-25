@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import json
 import os
 import re
 
@@ -32,10 +33,8 @@ def parse_sections(markdown: str):
         if line.startswith("### "):
             current = line[3:].strip()
             sections[current] = []
-        elif current and line.strip():
-            sections[current].append(line.strip())
-    for sec, lines in sections.items():
-        sections[sec] = [l[2:] if l.startswith("* ") else l for l in lines]
+        elif (current and line.strip().startswith("* ")) and "made their first contribution" not in line:
+            sections[current].append(line.strip()[2:].strip())
     return sections
 
 
@@ -63,20 +62,61 @@ for rel in releases:
 if release is not None:
     sections = parse_sections(release.body or "")
 
+    # print(json.dumps(sections))
+
     catagories = {}
+    dependencies_title = ""
     for title, items in sections.items():
         if any(x in title for x in ["Other Changes", "Documentation", "Maintenance", "Tests"]):
             continue
         parsed = []
+        go_dependencies = []
+        docker_dependencies = []
         for item in items:
             change = re.search("^(.*) by @.* in (.*)$", item)
+            # print(item)
             change_title = change.group(1)
             pr_link = change.group(2)
             pr_number = re.search(r"^.*/(\d+)$", pr_link)
-            parsed.append({"pr_number": pr_number.group(1), "pr_url": pr_link, "title": change_title})
-            # update the PR title with a capitalized first letter
-            parsed[-1]["title"] = parsed[-1]["title"].capitalize()
+            if "Dependencies" in title:
+                dependencies_title = title
+                if "go group" in change_title or "go_modules group" in change_title:
+                    change_title = "Bump Go dependencies"
+                    pr = {"details": f"[{pr_number.group(1)}]({pr_link})", "title": change_title}
+                    go_dependencies.append(pr)
+                elif (
+                    "Docker image update" in change_title
+                    or "docker group" in change_title
+                    or "docker-images group" in change_title
+                    or "in /build" in change_title
+                ):
+                    change_title = "Bump Docker dependencies"
+                    pr = {"details": f"[{pr_number.group(1)}]({pr_link})", "title": change_title}
+                    docker_dependencies.append(pr)
+                else:
+                    pr = f"[{pr_number.group(1)}]({pr_link}) {change_title.capitalize()}"
+                    parsed.append(pr)
+            else:
+                pr = f"[{pr_number.group(1)}]({pr_link}) {change_title.capitalize()}"
+                parsed.append(pr)
+
         catagories[title] = parsed
+
+    # print(catagories[dependencies_title])
+    go_dep_prs = "".join([f"{dep['details']}, " for dep in go_dependencies])
+    docker_dep_prs = "".join([f"{dep['details']}, " for dep in docker_dependencies])
+    go_dep_prs = f"{go_dep_prs.rstrip(', ')} {go_dependencies[0]['title']}"
+    docker_dep_prs = f"{docker_dep_prs.rstrip(', ')} {docker_dependencies[0]['title']}"
+
+    x = go_dep_prs.rsplit(",", 1)
+    go_dep_prs = " &".join(x)
+
+    x = docker_dep_prs.rsplit(",", 1)
+    docker_dep_prs = " &".join(x)
+
+    catagories[dependencies_title].append(docker_dep_prs)
+    catagories[dependencies_title].append(go_dep_prs)
+    catagories[dependencies_title].reverse()
 
 data = {
     "version": NIC_VERSION,
@@ -88,9 +128,6 @@ data = {
 
 # Render with Jinja2
 print(template.render(**data))
-
-# todo
-# group by type of change in depencencies
 
 # To close connections after use
 g.close()

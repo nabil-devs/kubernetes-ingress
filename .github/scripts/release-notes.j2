@@ -21,7 +21,7 @@
 
 ### <i class="fa-solid {{ icons[category] }}"></i> {{ category }}
 {%- for change in sections[key] %}
-- [{{ change.pr_number }}]({{ change.pr_url }}) {{ change.title }}
+- {{ change }}
 {%- endfor %}
 {%- endif %}
 {%- endfor %}
