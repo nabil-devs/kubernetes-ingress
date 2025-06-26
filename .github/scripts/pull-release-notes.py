@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 import argparse
-import json
 import os
 import re
+import sys
 
 from github import Auth, Github
 from jinja2 import Environment, FileSystemLoader
@@ -29,6 +29,8 @@ template = env.get_template("release-notes.j2")
 github_org = os.getenv("GITHUB_ORG", "nginx")
 github_repo = os.getenv("GITHUB_REPO", "kubernetes-ingress")
 token = os.environ.get("GITHUB_TOKEN")
+docker_pr_strings = ["Docker image update", "docker group", "docker-images group", "in /build"]
+golang_pr_strings = ["go group", "go_modules group"]
 
 
 def parse_sections(markdown: str):
@@ -57,12 +59,12 @@ def parse_sections(markdown: str):
     return sections
 
 
-def format_pr_groups(prs):
+def format_pr_groups(prs, title):
     # join the PR's into a comma, space separated string
     comma_sep_prs = "".join([f"{dep['details']}, " for dep in prs])
 
     # strip the last comma and space, and add the first PR title
-    trimmed_comma_sep_prs = f"{comma_sep_prs.rstrip(', ')} {prs[0]['title']}"
+    trimmed_comma_sep_prs = f"{comma_sep_prs.rstrip(', ')} {title}"
 
     # split the string by the last comma and join with an ampersand
     split_result = trimmed_comma_sep_prs.rsplit(",", 1)
@@ -71,6 +73,9 @@ def format_pr_groups(prs):
 
 # Get release text
 def get_github_release(version, github_org, github_repo, token):
+    if token == "":
+        print("ERROR: GITHUB token variable cannot be empty")
+        return None
     auth = Auth.Token(token)
     g = Github(auth=auth)
     repo = g.get_organization(github_org).get_repo(github_repo)
@@ -83,11 +88,16 @@ def get_github_release(version, github_org, github_repo, token):
     g.close()
     if release is not None:
         return release.body
-    print(f"Release v{NIC_VERSION} not found in {github_org}/{github_repo}.")
+    print(f"ERROR: Release v{NIC_VERSION} not found in {github_org}/{github_repo}.")
     return None
 
 
+## Main section of script
+
 release_body = get_github_release(NIC_VERSION, github_org, github_repo, token)
+if release_body is None:
+    print("ERROR: Cannot get release from Github.  Exiting...")
+    sys.exit(1)
 
 # Parse the release body to extract sections
 sections = parse_sections(release_body or "")
@@ -105,38 +115,32 @@ for title, changes in sections.items():
     go_dependencies = []
     docker_dependencies = []
     for line in changes:
-        print(line)
         change = re.search("^(.*) by @.* in (.*)$", line)
         change_title = change.group(1)
         pr_link = change.group(2)
         pr_number = re.search(r"^.*pull/(\d+)$", pr_link).group(1)
+        pr = {"details": f"[{pr_number}]({pr_link})", "title": change_title.capitalize()}
         if "Dependencies" in title:
+            # save section title for later use as lookup key to categories dict
             dependencies_title = title
-            if "go group" in change_title or "go_modules group" in change_title:
-                change_title = "Bump Go dependencies"
-                pr = {"details": f"[{pr_number}]({pr_link})", "title": change_title}
+
+            # Append Golang changes in to the go_dependencies list for later processing
+            if any(str in change_title for str in golang_pr_strings):
                 go_dependencies.append(pr)
-            elif (
-                "Docker image update" in change_title
-                or "docker group" in change_title
-                or "docker-images group" in change_title
-                or "in /build" in change_title
-            ):
-                change_title = "Bump Docker dependencies"
-                pr = {"details": f"[{pr_number}]({pr_link})", "title": change_title}
+            # Append Docker changes in to the docker_dependencies list for later processing
+            elif any(str in change_title for str in docker_pr_strings):
                 docker_dependencies.append(pr)
+            # Treat this change like any other ungrouped change
             else:
-                pr = f"[{pr_number}]({pr_link}) {change_title.capitalize()}"
-                parsed.append(pr)
+                parsed.append(f"{pr['details']} {pr['title']}")
         else:
-            pr = f"[{pr_number}]({pr_link}) {change_title.capitalize()}"
-            parsed.append(pr)
+            parsed.append(f"{pr['details']} {pr['title']}")
 
     catagories[title] = parsed
 
 # Add grouped dependencies to the Dependencies category
-catagories[dependencies_title].append(format_pr_groups(docker_dependencies))
-catagories[dependencies_title].append(format_pr_groups(go_dependencies))
+catagories[dependencies_title].append(format_pr_groups(docker_dependencies, "Bump Docker dependencies"))
+catagories[dependencies_title].append(format_pr_groups(go_dependencies, "Bump Go dependencies"))
 catagories[dependencies_title].reverse()
 
 # Populates the data needed for rendering the template
