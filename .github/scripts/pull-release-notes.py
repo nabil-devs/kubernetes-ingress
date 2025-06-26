@@ -66,23 +66,22 @@ if release is not None:
 
     catagories = {}
     dependencies_title = ""
-    for title, items in sections.items():
+    for title, changes in sections.items():
         if any(x in title for x in ["Other Changes", "Documentation", "Maintenance", "Tests"]):
             continue
         parsed = []
         go_dependencies = []
         docker_dependencies = []
-        for item in items:
-            change = re.search("^(.*) by @.* in (.*)$", item)
-            # print(item)
+        for line in changes:
+            change = re.search("^(.*) by @.* in (.*)$", line)
             change_title = change.group(1)
             pr_link = change.group(2)
-            pr_number = re.search(r"^.*/(\d+)$", pr_link)
+            pr_number = re.search(r"^.*pull/(\d+)$", pr_link).group(1)
             if "Dependencies" in title:
                 dependencies_title = title
                 if "go group" in change_title or "go_modules group" in change_title:
                     change_title = "Bump Go dependencies"
-                    pr = {"details": f"[{pr_number.group(1)}]({pr_link})", "title": change_title}
+                    pr = {"details": f"[{pr_number}]({pr_link})", "title": change_title}
                     go_dependencies.append(pr)
                 elif (
                     "Docker image update" in change_title
@@ -91,13 +90,13 @@ if release is not None:
                     or "in /build" in change_title
                 ):
                     change_title = "Bump Docker dependencies"
-                    pr = {"details": f"[{pr_number.group(1)}]({pr_link})", "title": change_title}
+                    pr = {"details": f"[{pr_number}]({pr_link})", "title": change_title}
                     docker_dependencies.append(pr)
                 else:
-                    pr = f"[{pr_number.group(1)}]({pr_link}) {change_title.capitalize()}"
+                    pr = f"[{pr_number}]({pr_link}) {change_title.capitalize()}"
                     parsed.append(pr)
             else:
-                pr = f"[{pr_number.group(1)}]({pr_link}) {change_title.capitalize()}"
+                pr = f"[{pr_number}]({pr_link}) {change_title.capitalize()}"
                 parsed.append(pr)
 
         catagories[title] = parsed
