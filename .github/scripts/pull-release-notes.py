@@ -25,6 +25,11 @@ template_dir = os.path.dirname(os.path.abspath(__file__))
 env = Environment(loader=FileSystemLoader(template_dir))
 template = env.get_template("release-notes.j2")
 
+# Set github environment
+github_org = os.getenv("GITHUB_ORG", "nginx")
+github_repo = os.getenv("GITHUB_REPO", "kubernetes-ingress")
+token = os.environ.get("GITHUB_TOKEN")
+
 
 def parse_sections(markdown: str):
     sections = {}
@@ -64,34 +69,28 @@ def format_pr_groups(prs):
     return " &".join(split_result)
 
 
-token = os.environ.get("GITHUB_TOKEN")
+# Get release text
+def get_github_release(version, github_org, github_repo, token):
+    auth = Auth.Token(token)
+    g = Github(auth=auth)
+    repo = g.get_organization(github_org).get_repo(github_repo)
+    release = None
+    releases = repo.get_releases()
+    for rel in releases:
+        if rel.tag_name == f"v{version}":
+            release = rel
+            break
+    g.close()
+    if release is not None:
+        return release.body
+    print(f"Release v{NIC_VERSION} not found in {github_org}/{github_repo}.")
+    return None
 
-# using an access token
-auth = Auth.Token(token)
 
-# Public Web Github
-g = Github(auth=auth)
-
-# Then play with your Github objects:
-ORG = os.getenv("GITHUB_ORG", "nginx")
-REPO = os.getenv("GITHUB_REPO", "kubernetes-ingress")
-
-repo = g.get_organization(ORG).get_repo(REPO)
-release = None
-releases = repo.get_releases()
-for rel in releases:
-    if rel.tag_name == f"v{NIC_VERSION}":
-        release = rel
-        break
-if release is None:
-    print(f"Release v{NIC_VERSION} not found in {ORG}/{REPO}.")
-    exit(1)
+release_body = get_github_release(NIC_VERSION, github_org, github_repo, token)
 
 # Parse the release body to extract sections
-sections = parse_sections(release.body or "")
-
-# Close github connection after use
-g.close()
+sections = parse_sections(release_body or "")
 
 # Prepare the data for rendering
 # We will create a dictionary with the sections and their changes
