@@ -1,0 +1,38 @@
+name: Trigger NIC Release Binary Builds
+
+on:
+  push:
+    branches:
+      - chore/secure-build
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  variables:
+    name: Set Variables
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Output Variables
+        id: vars
+        run: |
+          echo $GITHUB_REF
+
+  # rel-bins:
+  #   name: Release Binaries
+  #   uses: nginx/ci-self-hosted/.github/workflows/nic-binary.yml@nic-release
+  #   with:
+  #     tag: v5.2.0
+  #   secrets:
+  #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     ARTIFACTORY_USER: ${{ secrets.ARTIFACTORY_USER }}
+  #     ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
