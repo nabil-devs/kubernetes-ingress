@@ -27,12 +27,14 @@ jobs:
         run: |
           echo $GITHUB_REF
 
-  # rel-bins:
-  #   name: Release Binaries
-  #   uses: nginx/ci-self-hosted/.github/workflows/nic-binary.yml@nic-release
-  #   with:
-  #     tag: v5.2.0
-  #   secrets:
-  #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #     ARTIFACTORY_USER: ${{ secrets.ARTIFACTORY_USER }}
-  #     ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
+  rel-bins:
+    name: Release Binaries
+    uses: ./.github/workflows/nic-build.yml
+    with:
+      tag: v5.2.0
+      runner: ubuntu-24.04
+      dry_run: true
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ARTIFACTORY_USER: ${{ secrets.ARTIFACTORY_USER }}
+      ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}

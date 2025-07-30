@@ -1,0 +1,185 @@
+name: NIC binary builds
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to build vX.Y.Z'
+        required: true
+        type: string
+      runner:
+        description: 'Runner to use for the build'
+        required: false
+        type: string
+        default: 'ubuntu-24.04-amd64'
+      dry_run:
+        description: 'Whether to run the workflow in dry run mode'
+        required: true
+        type: boolean
+    secrets:
+      GITHUB_TOKEN:
+        description: 'GitHub token to use for the workflow'
+        required: true
+      ARTIFACTORY_USER:
+        description: 'Artifactory user to use for the workflow'
+        required: true
+      ARTIFACTORY_TOKEN:
+        description: 'Artifactory token to use for the workflow'
+        required: true
+    outputs:
+      artifact_name:
+        description: "The name of the uploaded artifact"
+        value: ${{ jobs.build.outputs.artifact_name }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.ref_name }}-nic-binary-build
+  cancel-in-progress: true
+
+jobs:
+  check-if-allowed:
+    if: ${{ ( github.repository_owner == 'nginx' || github.repository_owner == 'nginxinc' ) }}
+    runs-on: [ ubuntu-latest ]
+    steps:
+      - name: Check if we're in the allowed environment
+        run: |
+          org_found=0
+          event_found=0
+          ref_found=0
+          ALLOWED_ORGS="nginx"
+          ALLOWED_EVENTS="push workflow_dispatch"
+          ALLOWED_REFS="refs/heads/release- refs/heads/chore/secure-build"
+          for org in $ALLOWED_ORGS; do
+            if [ "$org" == "$GITHUB_REPOSITORY_OWNER" ]; then org_found=1; fi
+          done
+          for event in $ALLOWED_EVENTS; do
+            if [ "$event" == "$GITHUB_EVENT_NAME" ]; then event_found=1; fi
+          done
+          for ref in $ALLOWED_REFS; do
+            if [[ "$ref" =~ $GITHUB_REF ]]; then ref_found=1; fi
+          done
+          if [ $org_found$event_found$ref_found -ne 111 ]; then
+            echo "Repository owner, event, or ref are not explicitely allowed to use this workflow: $GITHUB_REPOSITORY_OWNER, $GITHUB_EVENT_NAME, $GITHUB_REF"
+            exit 1
+          fi
+          exit 0
+
+  build:
+    name: build
+    needs: [check-if-allowed]
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      artifact_name: ${{ steps.artifact_name.outputs.name }}
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
+
+      - name: Setup Golang Environment
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Extract NIC version
+        id: nic_version
+        run: |
+          tag=${{ inputs.tag }}
+          version=${tag#v}
+          echo "version=${version}" >> $GITHUB_OUTPUT
+
+      - name: Setup Golang Variables
+        id: vars
+        run: |
+          echo "go_path=$(go env GOPATH)" >> $GITHUB_OUTPUT
+
+      - name: Setup netrc
+        run: |
+          cat <<EOF > $HOME/.netrc
+          machine azr.artifactory.f5net.com
+              login ${{ secrets.ARTIFACTORY_USER }}
+              password ${{ secrets.ARTIFACTORY_TOKEN }}
+          EOF
+          chmod 600 $HOME/.netrc
+
+      - name: Build binaries
+        uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552 # v6.3.0
+        with:
+          version: latest
+          args: build --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOPATH: ${{ steps.vars.outputs.go_path }}
+          GOPROXY: "https://azr.artifactory.f5net.com/artifactory/api/go/f5-nginx-go-dev"
+          GORELEASER_CURRENT_TAG: "${{ inputs.tag }}"
+
+      - name: Download Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@7b36ad622f042cab6f59a75c2ac24ccb256e9b45 # v0.20.4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+
+      - name: Create SBOM and Sign
+        env:
+          SYFT_BIN: ${{ steps.syft.outputs.cmd }}
+          DIRECTORY: ${{ github.workspace }}/dist
+          VERSION: ${{ steps.nic_version.outputs.version }}
+          TARBALL_DIR: ${{ github.workspace }}/tarballs
+        run: |
+          directory=${DIRECTORY}
+          version=${VERSION}
+          tarball_dir=${TARBALL_DIR}
+          releases=$(find "${directory}" -mindepth 1 -type d)
+          syft_binary=${SYFT_BIN"}
+          cosign_binary=${COSIGN_BIN:-"cosign"}
+
+          if [ ! -d "${tarball_dir}" ]; then
+              mkdir "${tarball_dir}"
+          fi
+
+          for i in ${releases}; do
+              # fix for v1 in kubernetes-ingress_linux_amd64_v1
+              if [[ ${i} =~ v1 ]]; then
+                  mv "${i}" "${i%*_v1}"
+                  i=${i%*_v1}
+              fi
+
+              if [[ ${i} =~ aws ]]; then
+                  continue
+              fi
+              product_name=$(basename "${i}" | cut -d '_' -f 1)
+              product_arch=$(echo "${i}" | cut -d '_' -f 2-)
+              product_release="${product_name}_${version}_${product_arch}"
+              # shellcheck disable=SC2086
+              tarball_name="${tarball_dir}/${product_release}.tar.gz"
+              cp -r "${i}" "${directory}/${product_release}"
+              cp README.md LICENSE CHANGELOG.md "${directory}/${product_release}"
+
+              tar -czf "${tarball_name}" "${directory}/${product_release}"
+              ${syft_binary} scan file:"${directory}/${product_release}/nginx-ingress" -o spdx-json > "${tarball_name}.spdx.json"
+              pushd "${tarball_dir}"
+              sha256sum "${product_release}.tar.gz" >> "${product_name}_${version}_checksums.txt"
+              sha256sum "${product_release}.tar.gz.spdx.json" >> "${product_name}_${version}_checksums.txt"
+              popd
+          done
+
+          checksum_file=$(ls "${tarball_dir}"/*_checksums.txt )
+          ${cosign_binary} sign-blob "${checksum_file}" --output-signature="${checksum_file}.sig" --output-certificate="${checksum_file}.pem" -y
+
+      - name: Set artifact name
+        id: artifact_name
+        run: echo "name=nic-binary-builds-${{ inputs.tag }}" >> $GITHUB_OUTPUT
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          path: ${{ github.workspace }}/tarballs
+          name: ${{ steps.artifact_name.outputs.name }}
+          overwrite: true
+        if: ${{ inputs.dry_run != 'true' }}
