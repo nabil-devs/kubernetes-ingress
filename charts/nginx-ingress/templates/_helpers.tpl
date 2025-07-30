@@ -238,9 +238,7 @@ Build the args for the service binary.
 - -app-protect-log-level={{ .Values.controller.appprotect.logLevel }}
 {{ end }}
 {{- if .Values.controller.appprotect.enable }}
-{{- with index .Values.controller.appprotect.service.enforcer.ports 0 }}
-- -app-protect-enforcer-address="{{ include "nginx-ingress.fullname" $ }}-enforcer:{{ .port }}"
-{{- end }}
+- -app-protect-enforcer-address="{{ .Values.controller.appprotect.enforcer.host | default "127.0.0.1" }}:{{ .Values.controller.appprotect.enforcer.port | default 50000 }}"
 {{- end }}
 - -enable-app-protect-dos={{ .Values.controller.appprotectdos.enable }}
 {{- if .Values.controller.appprotectdos.enable }}
@@ -363,8 +361,16 @@ List of volumes for controller.
 - name: nginx-log
   emptyDir: {}
 {{- end }}
-{{- if .Values.controller.appprotect.v5 }}
-{{ toYaml .Values.controller.appprotect.volumes }}
+{{- if .Values.controller.appprotect.enable }}
+- name: app-protect-bd-config
+  emptyDir: {}
+- name: app-protect-config
+  emptyDir: {}
+- name: {{ .Values.controller.appprotect.storage.bundlesPath.name }}
+  persistentVolumeClaim:
+    claimName: app-protect-override-bundles-pvc
+{{/*TODO: make it customisable*/}}
+
 {{- end }}
 {{- if .Values.controller.volumes }}
 {{ toYaml .Values.controller.volumes }}
@@ -422,15 +428,11 @@ volumeMounts:
 - mountPath: /var/log/nginx
   name: nginx-log
 {{- end }}
-{{- if .Values.controller.appprotect.v5 }}
+{{- if .Values.controller.appprotect.enable }}
 - name: app-protect-bd-config
   mountPath: /opt/app_protect/bd_config
 - name: app-protect-config
   mountPath: /opt/app_protect/config
-  # app-protect-bundles is mounted so that Ingress Controller
-  # can verify that referenced bundles are present
-- name: app-protect-bundles
-  mountPath: /etc/app_protect/bundles
 {{- end }}
 {{- if .Values.controller.volumeMounts }}
 {{ toYaml .Values.controller.volumeMounts }}
@@ -454,8 +456,8 @@ volumeMounts:
 {{- end -}}
 {{- end -}}
 
-{{- define "nginx-ingress.appprotect.v5" -}}
-{{- if .Values.controller.appprotect.v5}}
+{{- define "nginx-ingress.appprotect" -}}
+{{- if .Values.controller.appprotect.enable}}
 - name: waf-enforcer
   image: {{ include "nap-enforcer.image" . }}
   imagePullPolicy: "{{ .Values.controller.appprotect.enforcer.image.pullPolicy }}"
@@ -465,7 +467,7 @@ volumeMounts:
 {{- end }}
   env:
     - name: ENFORCER_PORT
-      value: "{{ .Values.controller.appprotect.enforcer.port | default 50000 }}"
+      value: "{{ .Values.controller.appprotect.enforcer.port | default 50000  }}"
     - name: ENFORCER_CONFIG_TIMEOUT
       value: "0"
   volumeMounts:
@@ -484,7 +486,7 @@ volumeMounts:
     - name: app-protect-config
       mountPath: /opt/app_protect/config
     - name: app-protect-bundles
-      mountPath: /etc/app_protect/bundles
+      mountPath: {{ .Values.controller.appprotect.storage.bundlesPath.mountPath }}
 {{- end}}
 {{- end -}}
 
