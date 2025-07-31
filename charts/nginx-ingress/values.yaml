@@ -715,11 +715,3 @@ nginxAgent:
 nginx-app-protect:
   appprotect:
     replicas: 0
-  fullnameOverride: app-protect-override
-
-
-
-
-
-
-

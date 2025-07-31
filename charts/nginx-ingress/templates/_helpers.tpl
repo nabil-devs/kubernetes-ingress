@@ -368,8 +368,7 @@ List of volumes for controller.
   emptyDir: {}
 - name: {{ .Values.controller.appprotect.storage.bundlesPath.name }}
   persistentVolumeClaim:
-    claimName: app-protect-override-bundles-pvc
-{{/*TODO: make it customisable*/}}
+    claimName: {{ template "app-protect.fullname" .Subcharts.nginx-app-protect }}-bundles-pvc
 
 {{- end }}
 {{- if .Values.controller.volumes }}
